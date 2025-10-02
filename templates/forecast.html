@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Stock Forecast</title>
+<style>
+body { font-family: Arial; margin: 20px; background:#f9f9f9; text-align: center; }
+h2 { color:#222; font-size: 28px; margin-bottom: 20px; }
+.controls { margin: 0 auto 30px auto; background:#eee; padding:20px; border-radius:10px; max-width: 500px; text-align: left; box-shadow: 0px 2px 8px rgba(0,0,0,0.1); }
+.controls label { display:block; margin:10px 0 5px 0; font-weight: bold; }
+input, button { padding:7px; margin:5px 0; width: calc(100% - 14px); border-radius:5px; border:1px solid #ccc; }
+button { background: #28a745; color: white; font-weight: bold; cursor: pointer; transition: 0.3s; }
+button:hover { background: #218838; }
+table { border-collapse: collapse; width: 80%; margin: 20px auto; box-shadow: 0px 2px 6px rgba(0,0,0,0.1); }
+th, td { border: 1px solid #ccc; padding: 10px; text-align: center; }
+th { background-color: #222; color: #fff; }
+td.green { color: green; font-weight: bold; }
+td.red { color: red; font-weight: bold; }
+.results { margin-top: 30px; }
+img { max-width: 80%; margin: 20px auto; display: block; border-radius: 8px; box-shadow: 0px 2px 8px rgba(0,0,0,0.1); }
+.unit-input { width: 60px; margin-right: 5px; }
+
+/* Unified Progress bar */
+#progressContainer { display:none; margin: 15px auto; max-width: 500px; }
+#progressBarContainer { background:#eee; width:100%; border-radius:5px; overflow:hidden; }
+#progressBar { width:0%; height:25px; background: #3075ec; text-align:center; color:white; font-weight:bold; transition: width 0.2s linear; }
+
+/* Sit back message */
+#sitBack { font-size: 18px; color: #555; margin-top: 15px; font-style: italic; display:none; }
+</style>
+</head>
+<body>
+
+<h2>📊 Stock Analysis</h2>
+
+<div class="controls">
+    <label>Start Date: <input type="date" id="startDate" value="2008-01-01"></label>
+    <label>End Date: <input type="date" id="endDate" value="{{today}}"></label>
+    <label>Stock Ticker: <input type="text" id="ticker" value="TATASTEEL.NS" style="text-transform: uppercase;"></label>
+    <label>Number of LSTM Layers (1-3): <input type="number" id="num_layers" value="2" min="1" max="3"></label>
+    <div id="unitsContainer"></div>
+    <label>Epochs (10–1000): <input type="number" id="epochs" value="50" min="10" max="1000"></label>
+
+    <button id="runAnalysisBtn">Run Analysis</button>
+
+    <div id="forecastControls" style="display:none;">
+        <label>Nifty % Change: <input type="number" id="nifty_ch" step="0.01" value="0.33"></label>
+        <button id="forecastBtn">Forecast</button>
+    </div>
+</div>
+
+<div id="sitBack">Sit back and relax! Analysis starting in seconds...</div>
+
+<!-- Unified Progress Bar -->
+<div id="progressContainer">
+    <label id="progressLabel">Progress:</label>
+    <div id="progressBarContainer">
+        <div id="progressBar">0%</div>
+    </div>
+</div>
+
+<div class="results" id="resultsSection" style="display:none;">
+    <h3>📈 Forecast Result</h3>
+    <p id="todayOpenText">-</p>
+    <p id="rmseText">-</p>
+    <table id="forecastTable">
+        <tr>
+            <th>Open</th>
+            <th>Predicted High</th>
+            <th>Predicted Low</th>
+            <th>Predicted Close</th>
+        </tr>
+        <tr>
+            <td id="openVal">-</td>
+            <td id="highVal" class="green">-</td>
+            <td id="lowVal" class="red">-</td>
+            <td id="closeVal">-</td>
+        </tr>
+    </table>
+    <h3>📊 Residual Histogram</h3>
+    <img id="residualPlot" src="" alt="Residual Histogram">
+    <h3>📊 Prediction Plots</h3>
+    <img id="forecastPlot" src="" alt="Forecast Plot">
+</div>
+
+<script>
+// ------------------------
+// Dynamic LSTM units
+// ------------------------
+const numLayersInput = document.getElementById('num_layers');
+const unitsContainer = document.getElementById('unitsContainer');
+
+function generateUnitInputs() {
+    const numLayers = parseInt(numLayersInput.value);
+    unitsContainer.innerHTML = '<label>Units per Layer:</label>';
+    for(let i=0;i<numLayers;i++){
+        const input = document.createElement('input');
+        input.type='number';
+        input.className='unit-input';
+        input.value='50';
+        unitsContainer.appendChild(input);
+    }
+}
+generateUnitInputs();
+numLayersInput.addEventListener('change', generateUnitInputs);
+
+// ------------------------
+// Variables
+// ------------------------
+let trainedTicker = null;
+
+// ------------------------
+// Reset analysis and forecast table
+// ------------------------
+function resetAnalysis() {
+    document.getElementById('forecastControls').style.display = 'none';
+    trainedTicker = null;
+
+    // Reset table values
+    document.getElementById('todayOpenText').textContent = '-';
+    document.getElementById('openVal').textContent = '-';
+    document.getElementById('highVal').textContent = '-';
+    document.getElementById('lowVal').textContent = '-';
+    document.getElementById('closeVal').textContent = '-';
+
+    // Reset images
+    document.getElementById('forecastPlot').src = '';
+    document.getElementById('residualPlot').src = '';
+    document.getElementById('rmseText').textContent = '-';
+}
+
+// ------------------------
+// Input change listeners
+// ------------------------
+const startDateInput = document.getElementById('startDate');
+const endDateInput = document.getElementById('endDate');
+const tickerInput = document.getElementById('ticker');
+const epochInput = document.getElementById('epochs');
+
+[startDateInput, endDateInput, tickerInput, numLayersInput, epochInput].forEach(el => {
+    el.addEventListener('input', resetAnalysis);
+});
+unitsContainer.addEventListener('input', resetAnalysis);
+
+// ------------------------
+// Progress bar and messages
+// ------------------------
+function updateProgressBar(percent, label='Progress'){
+    const container = document.getElementById('progressContainer');
+    const bar = document.getElementById('progressBar');
+    const lbl = document.getElementById('progressLabel');
+    container.style.display = 'block';
+    lbl.textContent = label + ':';
+    bar.style.width = percent + '%';
+    bar.textContent = percent >= 100 ? 'Completed ✅' : percent + '%';
+}
+
+function setSitBack(msg){
+    const sit = document.getElementById('sitBack');
+    sit.style.display='block';
+    sit.textContent = msg;
+}
+
+// ------------------------
+// Run Analysis
+// ------------------------
+document.getElementById('runAnalysisBtn').addEventListener('click', async ()=>{
+    const startDate = startDateInput.value;
+    const endDate = endDateInput.value;
+    const ticker = tickerInput.value.toUpperCase();
+    const num_layers = parseInt(numLayersInput.value);
+    const epochs = parseInt(epochInput.value);
+    const unitInputs = document.querySelectorAll('#unitsContainer input');
+    const units = Array.from(unitInputs).map(u=>parseInt(u.value));
+
+    updateProgressBar(0, 'Training Progress');
+    setSitBack("Sit back and relax! Analysis starting in seconds...");
+    document.getElementById('resultsSection').style.display='none';
+
+    let percent = 0;
+
+    // Slowly fill progress bar
+    const interval = setInterval(()=>{
+        if(percent < 100){
+            percent += Math.random()*1.5; // slow fill
+            if(percent>99) percent=99; // max before complete
+            updateProgressBar(Math.floor(percent), 'Training Progress');
+        }
+    }, 200);
+
+    try {
+        const res = await fetch(`/api/train?start_date=${startDate}&end_date=${endDate}&ticker=${ticker}&num_layers=${num_layers}&units=${units}&epochs=${epochs}`);
+        const data = await res.json();
+        clearInterval(interval);
+        updateProgressBar(100, 'Training Completed');
+        setSitBack("Analysis completed! Ready for forecast");
+
+        document.getElementById('forecastPlot').src = data.forecast_plot;
+        document.getElementById('residualPlot').src = data.residual_plot;
+        document.getElementById('rmseText').innerHTML = `
+            🔹 RMSE High: ${data.rmse_high}<br>
+            🔹 RMSE Low: ${data.rmse_low}<br>
+            🔹 RMSE Close: ${data.rmse_close}
+        `;
+
+        document.getElementById('forecastControls').style.display='block';
+        document.getElementById('resultsSection').style.display='block';
+        trainedTicker = ticker;
+    } catch(err){
+        clearInterval(interval);
+        updateProgressBar(0, 'Error ❌');
+        setSitBack("Error during analysis");
+        alert("Error during training");
+    }
+});
+
+// ------------------------
+// Forecast
+// ------------------------
+document.getElementById('forecastBtn').addEventListener('click', async ()=>{
+    const ticker = tickerInput.value.toUpperCase();
+    const nifty_ch = parseFloat(document.getElementById('nifty_ch').value);
+
+    if(ticker !== trainedTicker){
+        alert("Please run analysis for this ticker first!");
+        return;
+    }
+
+    let percent = 0;
+    setSitBack("Forecasting...");
+    const interval = setInterval(()=>{
+        if(percent < 100){
+            percent += Math.random()*2; // slow fill
+            if(percent>99) percent=99;
+            updateProgressBar(Math.floor(percent), 'Forecasting');
+        }
+    }, 150);
+
+    try {
+        const res = await fetch(`/api/forecast?ticker=${ticker}&nifty_ch=${nifty_ch}`);
+        const data = await res.json();
+        clearInterval(interval);
+        updateProgressBar(100, 'Forecast Completed');
+        setSitBack("All done.. good work !!");
+
+        if(data.error){
+            alert(data.error);
+            return;
+        }
+
+        document.getElementById('todayOpenText').textContent = data.today_open_text;
+        document.getElementById('openVal').textContent = data.open;
+        document.getElementById('highVal').textContent = data.high;
+        document.getElementById('lowVal').textContent = data.low;
+        document.getElementById('closeVal').textContent = data.close;
+    } catch(err){
+        clearInterval(interval);
+        updateProgressBar(0, 'Error ❌');
+        setSitBack("Error during forecast");
+        alert("Error fetching forecast");
+    }
+});
+</script>
+</body>
+</html>
+
