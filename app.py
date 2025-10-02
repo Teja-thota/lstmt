@@ -11,6 +11,7 @@ from tensorflow.keras.layers import LSTM, Dense
 from io import BytesIO
 import base64
 from datetime import date
+import os
 
 app = Flask(__name__)
 
@@ -167,4 +168,5 @@ def api_forecast():
     })
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))  # Use Render's PORT if available
+    app.run(host="0.0.0.0", port=port)
