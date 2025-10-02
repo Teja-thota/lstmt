@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: lstm
+    name: lstmt
     env: python
     buildCommand: |
       python -m pip install --upgrade pip
