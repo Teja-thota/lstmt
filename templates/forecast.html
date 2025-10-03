@@ -34,12 +34,12 @@ img { max-width: 80%; margin: 20px auto; display: block; border-radius: 8px; box
 <h2>📊 Stock Analysis</h2>
 
 <div class="controls">
-    <label>Start Date: <input type="date" id="startDate" value="2008-01-01"></label>
+    <label>Start Date: <input type="date" id="startDate" value="2025-08-01"></label>
     <label>End Date: <input type="date" id="endDate" value="{{today}}"></label>
     <label>Stock Ticker: <input type="text" id="ticker" value="TATASTEEL.NS" style="text-transform: uppercase;"></label>
     <label>Number of LSTM Layers (1-3): <input type="number" id="num_layers" value="2" min="1" max="3"></label>
     <div id="unitsContainer"></div>
-    <label>Epochs (10–1000): <input type="number" id="epochs" value="50" min="10" max="1000"></label>
+    <label>Epochs (1-8): <input type="number" id="epochs" value="3" min="1" max="8"></label>
 
     <button id="runAnalysisBtn">Run Analysis</button>
 
@@ -93,14 +93,18 @@ const unitsContainer = document.getElementById('unitsContainer');
 function generateUnitInputs() {
     const numLayers = parseInt(numLayersInput.value);
     unitsContainer.innerHTML = '<label>Units per Layer:</label>';
-    for(let i=0;i<numLayers;i++){
+
+    for (let i = 0; i < numLayers; i++) {
         const input = document.createElement('input');
-        input.type='number';
-        input.className='unit-input';
-        input.value='50';
+        input.type = 'number';
+        input.className = 'unit-input';
+        input.value = 2; // default value >=2 and <=5
+        input.min = 2;   // minimum allowed value
+        input.max = 5;   // maximum allowed value
         unitsContainer.appendChild(input);
     }
 }
+
 generateUnitInputs();
 numLayersInput.addEventListener('change', generateUnitInputs);
 
